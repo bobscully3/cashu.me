@@ -36,7 +36,6 @@ import {
   type EventTemplate,
 } from "nostr-tools";
 import { bytesToHex } from "@noble/hashes/utils";
-import { SimplePool } from "nostr-tools";
 
 /** Nostr event kind of a wallet → mint request (ephemeral range). */
 export const REQUEST_KIND = 23410;
@@ -323,22 +322,69 @@ function buildRequestEvent(
 }
 
 export interface NostrMintTransportOptions {
-  /** Extra relays to publish/subscribe on, ahead of the fallbacks. */
+  /** Extra relays to connect to, ahead of the fallbacks. */
   relays?: string[];
-  /** Test seam: override the pool. */
-  pool?: SimplePool;
 }
 
 /**
- * The core wire round-trip: build → subscribe → publish → await validated reply.
- * Re-sends the identical event every RESEND_EVERY_MS until WINDOW_MS.
+ * The core wire round-trip: build → connect → REQ+EVENT on the same socket → await
+ * validated reply → re-send the IDENTICAL event every RESEND_EVERY_MS until WINDOW_MS.
+ *
+ * One fresh WebSocket per request mirrors the reference implementation (per-request
+ * throwaway client key + short-lived relay connection) and avoids pool-lifetime pitfalls
+ * with ephemeral kinds: the REQ is registered on the exact socket the EVENT is published
+ * to, so a fast reply can never race the subscription.
  */
+function rawWsCall(
+  url: string,
+  filter: unknown,
+  event: NostrEvent,
+  onEvent: (e: NostrEvent) => void,
+  onClose: () => void
+): () => void {
+  let settled = false;
+  const finish = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    try {
+      ws.close();
+    } catch {
+      /* already closed */
+    }
+    fn();
+  };
+  const ws = new WebSocket(url);
+  ws.addEventListener("open", () => {
+    try {
+      ws.send(JSON.stringify(["REQ", `maxplayer-mint-${event.id}`, filter]));
+      ws.send(JSON.stringify(["EVENT", event]));
+    } catch {
+      onClose();
+    }
+  });
+  ws.addEventListener("message", (ev: MessageEvent) => {
+    let msg: unknown[];
+    try {
+      msg = JSON.parse(String(ev.data));
+    } catch {
+      return;
+    }
+    if (Array.isArray(msg) && msg[0] === "EVENT" && msg[2]) {
+      onEvent(msg[2] as NostrEvent);
+    } else if (Array.isArray(msg) && msg[0] === "NOTICE") {
+      // Relay notice: not a reply; ignore.
+    }
+  });
+  ws.addEventListener("error", () => onClose());
+  ws.addEventListener("close", () => onClose());
+  return () => finish(() => undefined);
+}
+
 async function callWire(
   mintPk: string,
   op: string,
   body: unknown,
-  relays: string[],
-  pool: SimplePool
+  relays: string[]
 ): Promise<unknown> {
   const startedAt = Math.floor(Date.now() / 1000);
   const { event, requestId, clientSk } = buildRequestEvent(
@@ -348,41 +394,55 @@ async function callWire(
     startedAt
   );
   const clientPk = getPublicKey(clientSk);
+  const filter = {
+    kinds: [RESPONSE_KIND],
+    authors: [mintPk],
+    "#p": [clientPk],
+    since: startedAt - 10,
+  };
 
-  // Subscribe BEFORE publishing so a fast reply isn't missed. Replies are pushed into
-  // a queue by the onevent callback; the loop below drains it between re-sends.
   const replies: NostrEvent[] = [];
   let notify: (() => void) | null = null;
-  const sub = pool.subscribeMany(
-    relays,
-    [
-      {
-        kinds: [RESPONSE_KIND],
-        authors: [mintPk],
-        "#p": [clientPk],
-        since: startedAt - 10,
-      },
-    ],
-    {
-      id: `maxplayer-mint-${requestId}`,
-      onevent: (e: NostrEvent) => {
-        replies.push(e);
-        notify?.();
-      },
-    }
-  );
-
+  let liveSockets = 0;
   const deadline = Date.now() + WINDOW_MS;
   let nextSend = 0;
+  const closers: Array<() => void> = [];
   try {
+    for (const url of relays) {
+      liveSockets += 1;
+      closers.push(
+        rawWsCall(
+          url,
+          filter,
+          event,
+          (e) => {
+            replies.push(e);
+            notify?.();
+          },
+          () => {
+            liveSockets -= 1;
+          }
+        )
+      );
+    }
     while (Date.now() < deadline) {
       if (Date.now() >= nextSend) {
-        // A publish error is not a result; keep waiting and re-send.
-        const publishes: Array<Promise<string>> = pool.publish(relays, event);
-        publishes.forEach((p) => p.catch(() => undefined));
+        // Re-send the IDENTICAL signed event (same id) on fresh sockets — the mint
+        // replays the original reply for a repeated request id. Sockets that died
+        // (relay disconnect) are replaced; live ones just get a second publish.
+        for (const url of relays) {
+          closers.push(
+            rawWsCall(url, filter, event, (e) => {
+              replies.push(e);
+              notify?.();
+            }, () => {
+              liveSockets -= 1;
+            })
+          );
+          liveSockets += 1;
+        }
         nextSend = Date.now() + RESEND_EVERY_MS;
       }
-      // Wait for the next reply, the next re-send tick, or the deadline.
       const waitMs = Math.max(1, Math.min(nextSend, deadline) - Date.now());
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, waitMs);
@@ -413,7 +473,7 @@ async function callWire(
       `no mint reply within ${WINDOW_MS / 1000}s (op: ${op})`
     );
   } finally {
-    sub.close();
+    closers.forEach((c) => c());
   }
 }
 
@@ -432,7 +492,6 @@ export function makeNostrMintRequestFn(
     throw new Error(`not a nostr:// mint URL: ${mintUrl}`);
   }
   const relays = [...new Set([...(options.relays ?? []), ...FALLBACK_RELAYS])];
-  const pool = options.pool ?? new SimplePool();
 
   return async function nostrMintRequest<T = unknown>(
     args: RequestArgs
@@ -450,7 +509,7 @@ export function makeNostrMintRequestFn(
       throw new MintOperationError(0, `404 no wire op for endpoint ${path}`);
     }
     const body = buildOpBody(matched.op, matched.match, args.requestBody);
-    const result = await callWire(mintPk, matched.op, body, relays, pool);
+    const result = await callWire(mintPk, matched.op, body, relays);
     return result as T;
   };
 }
