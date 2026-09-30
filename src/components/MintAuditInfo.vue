@@ -126,6 +126,7 @@ interface SwapEventRead {
   error: string;
 }
 
+import { isNostrMintUrl } from "src/js/nostrMintTransport";
 import MintAuditWarningBox from "./MintAuditWarningBox.vue";
 import MintAuditSwapsBarChart from "./MintAuditSwapsBarChart.vue";
 import { useWalletStore } from "../stores/wallet";
@@ -187,6 +188,12 @@ export default {
   async mounted() {
     try {
       this.loading = true;
+      if (isNostrMintUrl(this.mintUrl)) {
+        // The external auditor indexes only https mints; a nostr:// mint can't be
+        // audited there. Say so instead of surfacing a confusing "Failed to fetch".
+        this.mintNotAudited = true;
+        throw new Error(`This mint is not being audited yet.`);
+      }
       await this.getMintInfo();
       if (this.mintInfo && this.mintInfo.id) {
         await this.getMintSwaps(this.mintInfo.id);

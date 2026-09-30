@@ -153,10 +153,15 @@ export default defineComponent({
   setup(props, { emit }) {
     const mintsStore = useMintsStore();
     const mintRecommendations = useMintRecommendationsStore();
+    // nostr:// mints route over the Maxplayer nostr wire transport
+    const isNostrMintUrl = (u: string) => u.toLowerCase().startsWith("nostr://");
     const showAuditInfo = ref(false);
     // "idle" | "loading" | "ok" | "error"
     const mintFetchState = ref("idle");
     const MINT_INFO_TIMEOUT_MS = 8000;
+    // nostr:// mints answer over the nostr wire (30s window incl. re-sends);
+    // relay latency can exceed the https timeout, so allow the full window.
+    const NOSTR_MINT_INFO_TIMEOUT_MS = 35_000;
 
     const showAddMintDialogLocal = computed({
       get: () => props.showAddMintDialog,
@@ -224,11 +229,14 @@ export default defineComponent({
         return;
       }
       mintFetchState.value = "loading";
+      const timeoutMs = isNostrMintUrl(url)
+        ? NOSTR_MINT_INFO_TIMEOUT_MS
+        : MINT_INFO_TIMEOUT_MS;
       const timeout = new Promise((resolve) =>
-        setTimeout(() => resolve("timeout"), MINT_INFO_TIMEOUT_MS)
+        setTimeout(() => resolve("timeout"), timeoutMs)
       );
       const fetch = mintRecommendations
-        .requestMintHttpInfo(url, MINT_INFO_TIMEOUT_MS)
+        .requestMintHttpInfo(url, timeoutMs)
         .then(() => "done")
         .catch(() => "done");
       await Promise.race([fetch, timeout]);
