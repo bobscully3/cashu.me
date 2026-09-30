@@ -285,8 +285,15 @@ function acceptReply(
   return null;
 }
 
+/**
+ * Random request id. crypto.randomUUID() exists only in secure contexts (HTTPS);
+ * the wallet can be served over plain HTTP (e.g. a LAN/tailnet preview), so derive
+ * the id from getRandomValues, which is available everywhere.
+ */
 function randomId(): string {
-  return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
 }
 
 /**
