@@ -46,7 +46,10 @@ export type StoredMint = {
  */
 export function mintApiFor(url: string): Mint {
   if (isNostrMintUrl(url)) {
-    return new Mint("https://nostr-mint.invalid", {
+    // The bundled cashu-ts is patched (scripts/patch-cashu-ts-nostr.cjs) to accept
+    // nostr://npub1... mint URLs, so the real URL can be stored on the Mint - which
+    // keeps Wallet.receive's token-mint == wallet-mint check working.
+    return new Mint(url, {
       customRequest: makeNostrMintRequestFn(url),
     });
   }

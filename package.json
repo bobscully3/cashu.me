@@ -21,7 +21,8 @@
     "test:e2e:video": "node .agents/skills/e2e-test-playwright-video/scripts/render.mjs",
     "test:e2e:playwright": "playwright test",
     "test:e2e:stack:up": "docker compose -f test/e2e/docker-compose.yml up -d --wait",
-    "test:e2e:stack:down": "docker compose -f test/e2e/docker-compose.yml down -v --remove-orphans"
+    "test:e2e:stack:down": "docker compose -f test/e2e/docker-compose.yml down -v --remove-orphans",
+    "postinstall": "node scripts/patch-cashu-ts-nostr.cjs"
   },
   "dependencies": {
     "@agicash/qr-scanner": "^0.1.2",
