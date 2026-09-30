@@ -7,7 +7,7 @@ import {
   Mint,
   TokenMetadata,
 } from "@cashu/cashu-ts";
-import { useMintsStore, WalletProof } from "src/stores/mints";
+import { useMintsStore, WalletProof, mintApiFor } from "src/stores/mints";
 import { useProofsStore } from "src/stores/proofs";
 export default {
   decode: decodeMeta,
@@ -66,7 +66,7 @@ async function decodeFull(encoded_token: string): Promise<Token | undefined> {
     // if (!knownMint) {
     //   throw new Error(`Token is from a mint you have not trusted: ${tokenMint}`);
     // }
-    const fetchKeysets = await new Mint(tokenMint).getKeySets();
+    const fetchKeysets = await mintApiFor(tokenMint).getKeySets();
     return getDecodedToken(
       encoded_token,
       fetchKeysets.keysets.map((k: { id: string }) => k.id)

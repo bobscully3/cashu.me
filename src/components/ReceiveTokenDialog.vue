@@ -288,7 +288,7 @@ import { defineComponent } from "vue";
 import { useReceiveTokensStore } from "src/stores/receiveTokensStore";
 import { useWalletStore } from "src/stores/wallet";
 import { useUiStore } from "src/stores/ui";
-import { useMintsStore } from "src/stores/mints";
+import { useMintsStore, mintApiFor } from "src/stores/mints";
 import { useTokensStore } from "src/stores/tokens";
 import { useCameraStore } from "src/stores/camera";
 import { useP2PKStore } from "src/stores/p2pk";
@@ -757,7 +757,7 @@ export default defineComponent({
     },
     fetchUntrustedMintInfo: async function (mintUrl: string) {
       try {
-        const mint = new Mint(mintUrl);
+        const mint = mintApiFor(mintUrl);
         const info = await mint.getInfo();
         this.untrustedMintInfo = info;
       } catch (error) {

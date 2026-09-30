@@ -4,7 +4,7 @@ import { generateSecretKey, getPublicKey } from "nostr-tools";
 import { bytesToHex } from "@noble/hashes/utils"; // already an installed dependency
 import { useWalletStore } from "./wallet";
 import { Mint, Wallet, CheckStateEnum, Proof } from "@cashu/cashu-ts";
-import { useMintsStore } from "./mints";
+import { useMintsStore, mintApiFor } from "./mints";
 import { notify, notifyError, notifySuccess } from "src/js/notify";
 import { useUiStore } from "./ui";
 import { useProofsStore } from "./proofs";
@@ -62,7 +62,7 @@ export const useRestoreStore = defineStore("restore", {
 
       const mnemonic = this.mnemonicToRestore;
       this.restoreStatus = i18n.global.t("restore.prepare_info_text");
-      const mint = new Mint(url);
+      const mint = mintApiFor(url);
       const keysets = (await mint.getKeySets()).keysets;
       let restoredSomething = false;
 

@@ -10,6 +10,10 @@ import {
   MintKeyset,
   GetInfoResponse,
 } from "@cashu/cashu-ts";
+import {
+  isNostrMintUrl,
+  makeNostrMintRequestFn,
+} from "src/js/nostrMintTransport";
 import { useUiStore } from "./ui";
 import { ref, watch } from "vue";
 import { useProofsStore } from "./proofs";
@@ -34,13 +38,28 @@ export type StoredMint = {
   // initialize api: new Mint(url) on activation
 };
 
+/**
+ * Build the cashu-ts `Mint` API for a mint URL. `nostr://` mints get a placeholder
+ * https URL (cashu-ts rejects the nostr scheme itself) plus a `customRequest` that
+ * routes every call over the Maxplayer nostr wire protocol; the placeholder URL is
+ * never fetched because customRequest replaces the default transport entirely.
+ */
+export function mintApiFor(url: string): Mint {
+  if (isNostrMintUrl(url)) {
+    return new Mint("https://nostr-mint.invalid", {
+      customRequest: makeNostrMintRequestFn(url),
+    });
+  }
+  return new Mint(url);
+}
+
 export class MintClass {
   mint: StoredMint;
   constructor(mint: StoredMint) {
     this.mint = mint;
   }
   get api() {
-    return new Mint(this.mint.url);
+    return mintApiFor(this.mint.url);
   }
   get proofs() {
     const proofsStore = useProofsStore();
@@ -320,6 +339,11 @@ export const useMintsStore = defineStore("mints", {
         // sanitize url
         const sanitizeUrl = (url: string): string => {
           let cleanedUrl = url.trim().replace(/\/+$/, "");
+          if (/^nostr:\/\//i.test(cleanedUrl)) {
+            // Nostr-transported mint (Maxplayer seller credits): keep the scheme,
+            // lowercase it, validate the npub below via activation.
+            return cleanedUrl.toLowerCase();
+          }
           if (!/^[a-z]+:\/\//.test(cleanedUrl)) {
             // Check for any protocol followed by "://"
             cleanedUrl = "https://" + cleanedUrl;
@@ -327,6 +351,11 @@ export const useMintsStore = defineStore("mints", {
           return cleanedUrl;
         };
         url = sanitizeUrl(url);
+        if (isNostrMintUrl(url) === false && /^nostr:\/\//i.test(url)) {
+          throw new Error(
+            "Invalid nostr mint URL: expected nostr://npub1… (bech32)"
+          );
+        }
 
         const mintToAdd: StoredMint = {
           url: url,

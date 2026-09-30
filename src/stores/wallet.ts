@@ -1,6 +1,12 @@
 import { defineStore } from "pinia";
 import { currentDateStr } from "src/js/utils";
-import { useMintsStore, WalletProof, MintClass, StoredMint } from "./mints";
+import {
+  useMintsStore,
+  WalletProof,
+  MintClass,
+  StoredMint,
+  mintApiFor,
+} from "./mints";
 import { useLocalStorage } from "@vueuse/core";
 import { useProofsStore } from "./proofs";
 import { HistoryToken, useTokensStore } from "./tokens";
@@ -63,6 +69,7 @@ import {
 import {
   Amount,
   Wallet,
+  Mint,
   Proof,
   type ProofLike,
   MintQuoteBolt11Request,
@@ -417,7 +424,11 @@ export const useWalletStore = defineStore("wallet", {
         this.mnemonic = generateMnemonic(wordlist);
       }
       const bip39seed = mnemonicToSeedSync(this.mnemonic);
-      const wallet = new Wallet(url, {
+      // nostr:// mints route every mint API call over the Maxplayer nostr wire
+      // protocol: pass the Mint instance with customRequest instead of the URL
+      // (cashu-ts rejects the nostr scheme in its own URL normalization).
+      const mintArg: string | Mint = mintApiFor(url);
+      const wallet = new Wallet(mintArg, {
         unit,
         bip39seed,
         counterSource: this.getOrCreateCounterSource(),
