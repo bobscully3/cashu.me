@@ -22,11 +22,11 @@ const REPLACEMENT =
 
 const SERIALIZE_ORIG = "amount: e.blindedMessage.amount.toString(),";
 const SERIALIZE_REPL =
-  "amount: (b => b <= 9007199254740991 ? Number(b) : b.toString())(BigInt(e.blindedMessage.amount.toString())),";
+  "amount: (b => typeof b === 'number' ? b : (typeof b.toNumber === 'function' ? b.toNumber() : Number(BigInt(b.toString().split(': ').pop()))))(e.blindedMessage.amount),"
 const INPUTS_ORIG =
   "_prepareInputsForMint(e, t = !1, n = !1) {\n		return e.map((e) => {\n			let r = this._normalizeWitness(e), { dleq: i, p2pk_e: a, ...o } = e, s = {\n				...o,\n				witness: r\n			};";
 const INPUTS_REPL =
-  "_prepareInputsForMint(e, t = !1, n = !1) {\n		return e.map((e) => {\n			let r = this._normalizeWitness(e), { dleq: i, p2pk_e: a, ...o } = e, s = {\n				...o,\n				amount: typeof o.amount === 'string' ? Number(o.amount) : o.amount,\n				witness: r\n			};";
+  "_prepareInputsForMint(e, t = !1, n = !1) {\n		return e.map((e) => {\n			let r = this._normalizeWitness(e), { dleq: i, p2pk_e: a, ...o } = e, s = {\n				...o,\n				amount: (a => typeof a === 'string' ? Number(a) : (a && typeof a.toNumber === 'function' ? a.toNumber() : a))(o.amount),\n				witness: r\n			};";
 
 let patched = 0;
 for (const file of candidates) {
