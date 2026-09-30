@@ -484,6 +484,43 @@ async function callWire(
   }
 }
 
+/**_wire_body_normalizer_v1_
+ * Final safety pass before signing: convert any value with a toNumber()
+ * method (cashu-ts Amount instances) and any numeric strings in "amount"
+ * fields to plain JSON numbers, so the mint's u64 deserialization never
+ * sees strings regardless of which code path built the body.
+ */
+function normalizeWireBody<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.map((v) => normalizeWireBody(v)) as unknown as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    let converted: unknown = v;
+    if (
+      k === "amount" &&
+      v !== null &&
+      typeof v === "object" &&
+      typeof (v as { toNumber?: unknown }).toNumber === "function"
+    ) {
+      converted = (v as { toNumber: () => number }).toNumber();
+    } else if (
+      k === "amount" &&
+      typeof v === "string" &&
+      /^\d+$/.test(v) &&
+      v.length < 19
+    ) {
+      converted = Number(v);
+    }
+    out[k] =
+      typeof converted === "object" && converted !== null
+        ? normalizeWireBody(converted)
+        : converted;
+  }
+  return out as T;
+}
+
 /**
  * Build a cashu-ts `RequestFn` that routes every mint API call over the Maxplayer
  * nostr wire protocol instead of HTTP. Pass this as `customRequest` to a `Mint`
@@ -515,7 +552,9 @@ export function makeNostrMintRequestFn(
     if (!matched) {
       throw new MintOperationError(0, `404 no wire op for endpoint ${path}`);
     }
-    const body = buildOpBody(matched.op, matched.match, args.requestBody);
+    const body = normalizeWireBody(
+      buildOpBody(matched.op, matched.match, args.requestBody)
+    );
     const result = await callWire(mintPk, matched.op, body, relays);
     return result as T;
   };
